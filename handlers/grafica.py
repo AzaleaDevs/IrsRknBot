@@ -1,14 +1,15 @@
 import io
 import re
+import traceback
 from typing import List, Tuple
 from telegram import Update, FSInputFile
 from telegram.ext import ContextTypes, CommandHandler
 
+# Backend headless para Docker
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Colores básicos en español -> nombres que reconoce matplotlib
 COLOR_MAP = {
     "azul": "blue",
     "rojo": "red",
@@ -32,11 +33,9 @@ HELP_TEXT = (
     "Uso: /grafica <numero> <color> <objeto> [<numero> <color> <objeto> ...]\n"
     "Ejemplos:\n"
     "  /grafica 94 azul cielo 6 rojo fuego\n"
-    "  /grafica 30 verde manzanas 20 rojo fresas 50 azul arándanos\n\n"
+    "  /grafica 30 verde ventas online 70 rojo ventas tienda\n"
     "Notas:\n"
     "  - El objeto puede tener varias palabras (se toma todo hasta el siguiente número).\n"
-    "  - Colores soportados: azul, rojo, verde, amarillo, morado, violeta, naranja,\n"
-    "    negro, blanco, gris, cian, magenta, rosa, marrón/marron, turquesa.\n"
 )
 
 _number_re = re.compile(r"^[+-]?(\d+([.,]\d*)?|[.,]\d+)$")
@@ -48,12 +47,6 @@ def _to_float(token: str) -> float:
     return float(token.replace(",", "."))
 
 def _parse_triples(text: str) -> List[Tuple[float, str, str]]:
-    """
-    Devuelve lista de triples (valor, color, etiqueta) a partir de:
-    <num> <color> <obj> [<num> <color> <obj> ...]
-    El <obj> puede abarcar varios tokens hasta el siguiente <num>.
-    """
-    # Quita el prefijo del comando y menciones (/grafica@MiBot)
     cleaned = re.sub(r"^/grafica(@\w+)?\s*", "", text, flags=re.IGNORECASE).strip()
     if not cleaned:
         raise ValueError("Faltan argumentos.")
@@ -63,19 +56,14 @@ def _parse_triples(text: str) -> List[Tuple[float, str, str]]:
     triples: List[Tuple[float, str, str]] = []
 
     while i < len(tokens):
-        # 1) número
         if i >= len(tokens) or not _is_number(tokens[i]):
             raise ValueError(f"Se esperaba un número en la posición {i+1} (token: '{tokens[i] if i < len(tokens) else ''}').")
-        value = _to_float(tokens[i])
-        i += 1
+        value = _to_float(tokens[i]); i += 1
 
-        # 2) color
         if i >= len(tokens):
             raise ValueError("Falta el color después del número.")
-        color = tokens[i].lower()
-        i += 1
+        color = tokens[i].lower(); i += 1
 
-        # 3) objeto (uno o más tokens) hasta el siguiente número o fin
         if i >= len(tokens):
             raise ValueError("Falta el objeto/etiqueta después del color.")
         start = i
@@ -92,45 +80,51 @@ def _parse_triples(text: str) -> List[Tuple[float, str, str]]:
 async def grafica(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.effective_message
     try:
-        triples = _parse_triples(msg.text or "")
+        text = msg.text or ""
+        print(f"[grafica] Mensaje recibido: {text}")
+
+        triples = _parse_triples(text)
+        print(f"[grafica] Triples parseados: {triples}")
+
+        values = [v for v, _, _ in triples]
+        labels = [lbl for _, _, lbl in triples]
+        total = sum(values)
+        if total <= 0:
+            await msg.reply_text("⚠️ La suma de los valores debe ser mayor que 0.")
+            return
+
+        colors = [COLOR_MAP.get(c, None) for _, c, _ in triples]
+
+        fig, ax = plt.subplots(figsize=(5, 5), dpi=150)
+        ax.pie(
+            values,
+            labels=labels,
+            autopct=lambda p: f"{p:.1f}%",
+            startangle=90,
+            colors=colors if any(colors) else None,
+        )
+        ax.axis("equal")
+
+        buf = io.BytesIO()
+        plt.tight_layout()
+        fig.savefig(buf, format="png", bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+
+        await msg.reply_photo(
+            photo=FSInputFile(buf, filename="grafica.png"),
+            caption="📊 Gráfico de sectores",
+        )
+        print("[grafica] Imagen enviada correctamente.")
+
     except ValueError as e:
+        # Errores de formato/parsing → mensaje útil al usuario
+        print(f"[grafica] Error de validación: {e}")
         await msg.reply_text(f"⚠️ {e}\n\n{HELP_TEXT}")
-        return
-
-    values = [v for v, _, _ in triples]
-    labels = [lbl for _, _, lbl in triples]
-    total = sum(values)
-
-    if total <= 0:
-        await msg.reply_text("⚠️ La suma de los valores debe ser mayor que 0.")
-        return
-
-    # Colores: usa el color si está en el mapa, si no None (matplotlib elige)
-    colors = []
-    for _, col, _ in triples:
-        colors.append(COLOR_MAP.get(col, None))
-
-    # Dibujar pie chart
-    fig, ax = plt.subplots(figsize=(5, 5), dpi=150)
-    ax.pie(
-        values,
-        labels=labels,
-        autopct=lambda p: f"{p:.1f}%",
-        startangle=90,
-        colors=colors if any(colors) else None,
-    )
-    ax.axis("equal")
-
-    buf = io.BytesIO()
-    plt.tight_layout()
-    fig.savefig(buf, format="png", bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-
-    await msg.reply_photo(
-        photo=FSInputFile(buf, filename="grafica.png"),
-        caption="📊 Gráfico de sectores",
-    )
+    except Exception as e:
+        # Cualquier otro error → log completo y aviso genérico
+        print("[grafica] Excepción no controlada:\n" + traceback.format_exc())
+        await msg.reply_text("❌ Hubo un error generando la gráfica. Revisa el formato o los logs del bot.")
 
 def get_handler():
     return CommandHandler("grafica", grafica)
