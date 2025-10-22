@@ -1,22 +1,37 @@
 import os
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+import importlib
+import pkgutil
+import handlers
+from telegram.ext import Application
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("hola mundo prueba actualizada desde casa.")
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Escribe /hola")
+def load_handlers(app: Application) -> None:
+    """
+    Carga automáticamente todos los módulos en handlers/*
+    y, si exponen get_handler(), lo registra en la app.
+    """
+    for _, module_name, _ in pkgutil.iter_modules(handlers.__path__):
+        module_fullname = f"{handlers.__name__}.{module_name}"
+        try:
+            module = importlib.import_module(module_fullname)
+            if hasattr(module, "get_handler"):
+                handler = module.get_handler()
+                app.add_handler(handler)
+                print(f"✅ Handler cargado: {module_fullname}")
+            else:
+                print(f"ℹ️  {module_fullname} no define get_handler(), omitido.")
+        except Exception as e:
+            print(f"❌ Error cargando {module_fullname}: {e}")
 
 def main():
     if not BOT_TOKEN:
         raise RuntimeError("Falta la variable de entorno BOT_TOKEN")
+
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("hola", hola))
-    app.add_handler(CommandHandler("start", start))
-    # Long polling: no necesitas abrir puertos
+    load_handlers(app)
+
+    print("🤖 Bot iniciado con carga dinámica de comandos…")
     app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
