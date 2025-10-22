@@ -5,7 +5,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 async def hola(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("hola mundo")
+    await update.message.reply_text("hola mundo prueba actualizada")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Escribe /hola")
