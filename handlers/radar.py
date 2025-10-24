@@ -7,7 +7,6 @@ from telegram.ext import ContextTypes, CommandHandler
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 
 HELP = (
     "Uso: /radar <categoria1> <valor1> <categoria2> <valor2> ...\n"
@@ -16,7 +15,6 @@ HELP = (
 )
 
 def _parse_args(text: str):
-    """Extrae pares (categoria, valor) del texto."""
     parts = text.split()
     if parts and parts[0].startswith("/radar"):
         parts = parts[1:]
@@ -31,7 +29,7 @@ def _parse_args(text: str):
             val = float(parts[i + 1].replace(",", "."))
         except ValueError:
             raise ValueError(f"El valor '{parts[i + 1]}' no es numérico.")
-        if val < 0 or val > 10:
+        if not (0 <= val <= 10):
             raise ValueError(f"El valor de '{label}' debe estar entre 0 y 10.")
         labels.append(label.capitalize())
         values.append(val)
@@ -43,26 +41,27 @@ async def radar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         text = msg.text or ""
         labels, values = _parse_args(text)
-        n = len(values)
+        n_vars = len(labels)
 
-        # Cerrar el polígono
-        values += values[:1]
-        angles = [n / float(n) * 2 * math.pi for n in range(len(values))]
-        # o mejor aún:
-        angles = [i / float(n) * 2 * math.pi for i in range(n)]
-        angles += angles[:1]
+        # Ángulos equiespaciados
+        angles = [i / float(n_vars) * 2 * math.pi for i in range(n_vars)]
+        # Cerrar el polígono (repetimos primer punto)
+        angles_closed = angles + angles[:1]
+        values_closed = values + values[:1]
 
         fig, ax = plt.subplots(subplot_kw={"projection": "polar"}, figsize=(6, 6), dpi=150)
         ax.set_theta_offset(math.pi / 2)
         ax.set_theta_direction(-1)
 
-        plt.xticks(angles[:-1], labels)
+        ax.set_xticks(angles)
+        ax.set_xticklabels(labels)
         ax.set_rlabel_position(0)
-        plt.yticks([2, 4, 6, 8, 10], ["2", "4", "6", "8", "10"], color="gray", size=8)
-        plt.ylim(0, 10)
+        ax.set_ylim(0, 10)
+        ax.set_yticks([2, 4, 6, 8, 10])
+        ax.set_yticklabels(["2", "4", "6", "8", "10"])
 
-        ax.plot(angles, values, linewidth=2, linestyle="solid", color="purple")
-        ax.fill(angles, values, "violet", alpha=0.25)
+        ax.plot(angles_closed, values_closed, linewidth=2, linestyle="solid", color="purple")
+        ax.fill(angles_closed, values_closed, "violet", alpha=0.25)
 
         plt.title("🌐 Gráfico de Radar", size=14, weight="bold", pad=20)
 
